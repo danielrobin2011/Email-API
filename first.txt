@@ -1,0 +1,76 @@
+package com.tricon.EmailSchedularService.ServiceImpl;
+import java.util.Map;
+ 
+import javax.mail.MessagingException;
+import javax.mail.internet.MimeMessage;
+
+import org.apache.velocity.app.VelocityEngine;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.stereotype.Service;
+
+import com.tricon.EmailSchedularService.IService.MailService;
+import com.tricon.EmailSchedularService.Util.Constants;
+import com.tricon.EmailSchedularService.vo.Mail;
+import org.springframework.ui.velocity.VelocityEngineUtils;
+ 
+@Service("mailService")
+public class MailServiceImpl implements MailService {
+ 
+    @Autowired
+    JavaMailSender mailSender;
+ 
+    @Autowired
+    VelocityEngine velocityEngine;
+    
+    private static final Logger log = LoggerFactory.getLogger(MailServiceImpl.class);
+    
+    
+    public void sendEmail(Mail mail) {
+        MimeMessage mimeMessage = mailSender.createMimeMessage();
+ 
+        try {
+ 
+            MimeMessageHelper mimeMessageHelper = new MimeMessageHelper(mimeMessage, true);
+            mimeMessageHelper.setSubject(mail.getMailSubject());
+            mimeMessageHelper.setFrom(mail.getMailFrom());
+            mimeMessageHelper.setTo(mail.getMailTo());
+            
+            if(Constants.INTERNAL_REVIEWER_TEMPLATE.equalsIgnoreCase(mail.getTemplateType())) {
+            	mail.setMailContent(geContentFromTemplateForInternal(mail.getModel()));
+            	
+            }else {
+            	mail.setMailContent(geContentFromTemplate(mail.getModel())); 
+            }
+            mimeMessageHelper.setText(mail.getMailContent(), true);
+ 
+            mailSender.send(mimeMessageHelper.getMimeMessage());
+            log.info("Mail Send Successfullt to:"+mail.getMailTo());
+        } catch (MessagingException e) {
+            log.error("Exception Occured While Sending MAIL in MailServiceImpl.sendEmail with exception message: "+e.getMessage());
+        }
+    }
+ 
+    public String geContentFromTemplate(Map < String, Object > model) {
+        StringBuffer content = new StringBuffer();
+        try {
+            content.append(VelocityEngineUtils.mergeTemplateIntoString(velocityEngine, "/template/email-template.vm", model));
+        } catch (Exception e) {
+        	log.error("Exception Occured While fetching content from template in MailServiceImpl.geContentFromTemplate with exception message: "+e.getMessage());
+        }
+        return content.toString();
+    }
+    
+    public String geContentFromTemplateForInternal(Map < String, Object > model) {
+        StringBuffer content = new StringBuffer();
+        try {
+            content.append(VelocityEngineUtils.mergeTemplateIntoString(velocityEngine, "/template/email-template-internal.vm", model));
+        } catch (Exception e) {
+        	log.error("Exception Occured While fetching content from template in MailServiceImpl.geContentFromTemplate with exception message: "+e.getMessage());
+        }
+        return content.toString();
+    }
+ }

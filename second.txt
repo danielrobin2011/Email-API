@@ -1,0 +1,180 @@
+package com.tricon.EmailSchedularService.Controller;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Controller;
+import com.tricon.EmailSchedularService.IService.IExternalReviewersService;
+import com.tricon.EmailSchedularService.IService.MailService;
+import com.tricon.EmailSchedularService.Util.Constants;
+import com.tricon.EmailSchedularService.vo.Mail;
+import com.tricon.EmailSchedularService.vo.Reviewer;
+
+@Controller
+public class EmailSchedulingController {
+
+	private static final Logger log = LoggerFactory.getLogger(EmailSchedulingController.class);
+
+	@Autowired
+	IExternalReviewersService externalService;
+
+	@Autowired
+	MailService mailService;
+	
+	@Value("${URL}")
+	String URL;
+	
+	@Value("${CONFIG_USERNAME}")
+	private String username;
+	
+	@Value("${SMTP_HOST}")
+	private String SMTP_HOST;
+
+	@Value("${SMTP_PORT}")
+	private int SMTP_PORT;
+
+	@Value("${CONFIG_PASSWORD}")
+	private String password;
+
+	private String getExpireDate(long days) {
+		Date date = new Date();
+		date.setTime(date.getTime() + (days) * 24 * 60 * 60 * 1000);
+		SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+		String expireDate = dateFormat.format(date);
+		return expireDate;
+	}
+
+	@Scheduled(cron = "${CronExpression}")
+	public void mailScheduler() {
+		
+		
+		
+		externalService.getAllReviewerForMail().forEach(reviewer -> {
+			int offset = 0;
+			int limit = Constants.MAX_MAIL_PER_DAY;
+			int count = 0;
+
+			while (true && count <= Constants.MAX_MAIL_PER_DAY) {
+				count++;
+				int noOfAssociates = 0;
+				List<Reviewer> reviewerDetailsForMail = externalService.getReviewerDetailsById(reviewer.getReviewerId(),limit, offset);
+				Mail mail = new Mail();
+				mail.setMailTo(reviewer.getReviewerId());
+				mail.setMailFrom(username);
+				mail.setMailSubject(Constants.MAIL_SUBJECT);
+				
+				Map<String, Object>model = new HashMap<String, Object>();
+				List<Object[]> externalReviewerData = new ArrayList<>();
+				List<List<String>>revieweesDetails=new ArrayList<List<String>>();
+				
+				for (Reviewer reviewerDetails : reviewerDetailsForMail) {
+					String expireDate=getExpireDate(Constants.MAX_DAYS_EXPIRY_FOR_URL);
+					noOfAssociates++;
+					String url="<a href='"+URL+Constants.REVIEWER_LINK+reviewerDetails.getHash()+Constants.LINK_CSS + reviewerDetails.getRevieweeName() +"</a>";
+
+					Object[] tmp = { expireDate, reviewerDetails.getId() };
+					externalReviewerData.add(tmp);
+					
+					List<String>revieweeDetails=new ArrayList<String>();
+					revieweeDetails.add(reviewerDetails.getRevieweeName());
+					revieweeDetails.add(reviewerDetails.getCycleYear());
+					revieweeDetails.add(reviewerDetails.getApprsailCycle());
+					revieweeDetails.add(url);
+					revieweeDetails.add(expireDate);
+					
+					revieweesDetails.add(revieweeDetails);
+				}
+				externalService.updateExternalMailStatus(externalReviewerData);
+				try {
+					if (noOfAssociates > 0) {
+						model.put("reviewer", reviewer.getReviewerName()+" "+reviewer.getReviewerLastName());
+						model.put("reviewees", revieweesDetails);
+						model.put("unsubscribe",URL+Constants.UNSUBSCRIBE_MAIL_LINK+reviewer.getReviewerId());
+						mail.setModel(model);
+						mailService.sendEmail(mail);
+					}
+				} catch (Exception e) {
+					log.error("Exception Occurred in the method sendingEmails and the exception is : " + e.getMessage());
+				}
+
+				if (reviewerDetailsForMail.size() < limit) {
+					log.info("All mail send successfully! for reviewerid: " + reviewer.getRevieweeId());
+					break;
+				} else {
+					offset = limit + 1;
+				}
+			}
+
+		});
+
+	}
+	
+	@Scheduled(cron = "${CronExpression.internal.reviewer}")
+	public void mailSchedulerForInternalReviewer() {
+		
+		externalService.getAllInternalReviewerForMail().forEach(reviewer -> {
+			int offset = 0;
+			int limit = Constants.MAX_MAIL_PER_DAY;
+			int count = 0;
+
+			while (true && count <= Constants.MAX_MAIL_PER_DAY) {
+				count++;
+				int noOfAssociates = 0;
+				List<Reviewer> reviewerDetailsForMail = externalService.getReviewerDetailsByIdForInternalReviewer(reviewer.getReviewerId(),limit, offset);
+				Mail mail = new Mail();
+				mail.setTemplateType(Constants.INTERNAL_REVIEWER_TEMPLATE);
+				mail.setMailTo(reviewer.getEmpUserName()+"@triconinfotech.com");
+				mail.setMailFrom(username);
+				mail.setMailSubject(Constants.MAIL_SUBJECT);
+				Map<String, Object>model = new HashMap<String, Object>();
+				List<Object[]> internalReviewerData = new ArrayList<>();
+				List<List<String>>revieweesDetails=new ArrayList<List<String>>();
+				
+				for (Reviewer reviewerDetails : reviewerDetailsForMail) {
+					noOfAssociates++;
+					List<String>revieweeDetails=new ArrayList<String>();
+					revieweeDetails.add(reviewerDetails.getRevieweeName());
+					revieweeDetails.add(reviewerDetails.getCycleYear());
+					revieweeDetails.add(reviewerDetails.getApprsailCycle());
+					revieweesDetails.add(revieweeDetails);
+					Object[] tmp = { reviewerDetails.getId() };
+					internalReviewerData.add(tmp);
+				}
+				externalService.updateExternalMailStatusForInternalReviewer(internalReviewerData);
+				try {
+					if (noOfAssociates > 0) {
+						if(reviewer.getReviewerLastName()!=null)
+							model.put("reviewer", reviewer.getReviewerName()+" "+reviewer.getReviewerLastName());
+						else
+							model.put("reviewer", reviewer.getReviewerName());	
+						
+						model.put("reviewees", revieweesDetails);
+						model.put("link", URL);
+						model.put("unsubscribe",URL+Constants.UNSUBSCRIBE_MAIL_LINK_INTERNAL+reviewer.getReviewerId());
+						mail.setModel(model);
+						mailService.sendEmail(mail);
+					}
+				} catch (Exception e) {
+					log.error("Exception Occurred in the method sendingEmails and the exception is : " + e.getMessage());
+				}
+
+				if (reviewerDetailsForMail.size() < limit) {
+					log.info("All mail send successfully! for reviewerid: " + reviewer.getRevieweeId());
+					break;
+				} else {
+					offset = limit + 1;
+				}
+			}
+
+		});
+
+	}
+}
