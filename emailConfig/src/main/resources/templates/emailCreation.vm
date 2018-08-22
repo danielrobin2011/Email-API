@@ -1,0 +1,9 @@
+<html>
+<body>
+	<p>
+		Hello ${firstName} ${secondName},<br>
+		<br> Your ticket has been successfully created! <br>
+		<br> Thank You.
+	</p>
+</body>
+</html>
